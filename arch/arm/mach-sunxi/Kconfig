@@ -288,6 +288,7 @@ config MACH_SUN50I
 	select SUNXI_DRAM_DW_32BIT
 	select FIT
 	select SPL_LOAD_FIT
+	select CMD_POWEROFF
 	select SUNXI_A64_TIMER_ERRATUM
 
 config MACH_SUN50I_H5
@@ -296,6 +297,7 @@ config MACH_SUN50I_H5
 	select MACH_SUNXI_H3_H5
 	select FIT
 	select SPL_LOAD_FIT
+	select CMD_POWEROFF
 
 config MACH_SUN50I_H6
 	bool "sun50i (Allwinner H6)"
