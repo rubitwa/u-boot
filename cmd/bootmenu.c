@@ -44,6 +44,8 @@ enum bootmenu_key {
 	KEY_SELECT,
 };
 
+static struct bootmenu_data *bootmenu = NULL;
+
 static char *bootmenu_getoption(unsigned short int n)
 {
 	char name[MAX_ENV_SIZE];
@@ -229,11 +231,15 @@ static char *bootmenu_choice_entry(void *data)
 	return NULL;
 }
 
-static void bootmenu_destroy(struct bootmenu_data *menu)
+static void bootmenu_destroy(struct bootmenu_data **menu)
 {
-	struct bootmenu_entry *iter = menu->first;
+	struct bootmenu_entry *iter;
 	struct bootmenu_entry *next;
 
+	if (!*menu)
+		return;
+
+	iter = (*menu)->first;
 	while (iter) {
 		next = iter->next;
 		free(iter->title);
@@ -241,164 +247,237 @@ static void bootmenu_destroy(struct bootmenu_data *menu)
 		free(iter);
 		iter = next;
 	}
-	free(menu);
+	free(*menu);
+	*menu = NULL;
 }
+
+struct bootmenu_entry *bootmenu_make_entry(struct bootmenu_data *menu,
+	const char *title, int titlelen, const char *command,
+	int commandlen)
+{
+	int i;
+	struct bootmenu_entry *entry;
+	struct bootmenu_entry *iter;
+
+	if (menu->count > MAX_COUNT)
+		return 0;
+
+	if (!(entry = malloc(sizeof(struct bootmenu_entry))))
+		return 0;
+	memset(entry, 0, sizeof(struct bootmenu_entry));
+
+	if (title != NULL) {
+		if (!titlelen) titlelen = strlen(title);
+		if (!(entry->title = malloc(titlelen + 5))) {
+			free(entry);
+			return 0;
+		}
+		i = sprintf(entry->title, "%d. ", menu->count+1);
+		if (titlelen > 0) memcpy(&entry->title[i], title, titlelen);
+		entry->title[titlelen+i] = 0;
+	}
+
+	if (command != NULL) {
+		if (!commandlen) commandlen = strlen(command);
+		if (!(entry->command = malloc(commandlen+1))) {
+			if (entry->title) free(entry->title);
+			free(entry);
+			return 0;
+		}
+		if (commandlen > 0) memcpy(entry->command, command, commandlen);
+		entry->command[commandlen] = 0;
+	}
+
+	entry->menu = menu;
+	entry->num = menu->count++;
+	sprintf(entry->key, "%d", entry->num);
+	if ((iter = menu->first)) {
+		while (iter->next) iter = iter->next;
+		iter->next = entry;
+	} else {
+		menu->first = entry;
+	}
+
+	return entry;
+}
+
+#ifdef CONFIG_HAVE_BLOCK_DEVICE
+#include <blk.h>
+
+static enum if_type bootmenu_if_types[] = {
+#ifdef CONFIG_IDE
+	IF_TYPE_IDE,
+#endif
+#ifdef CONFIG_SCSI
+	IF_TYPE_SCSI,
+#endif
+#ifdef CONFIG_CMD_USB
+	IF_TYPE_USB,
+#endif
+#ifdef CONFIG_CMD_MMC
+	IF_TYPE_MMC,
+#endif
+#ifdef CONFIG_SATA
+	IF_TYPE_SATA,
+#endif
+#ifdef CONFIG_SANDBOX
+	IF_TYPE_HOST,
+#endif
+	IF_TYPE_UNKNOWN, /* term of list */
+};
+
+#define BOOTMENU_BLKDEV_CMD_NAME "bootcmd_blkdev"
+
+#define BOOTMENU_BLKDEV_CMD_DEFAULT_BODY \
+	"if ${devtype} dev ${devnum}; then " \
+		"run scan_dev_for_boot_part; " \
+	"fi"
+
+#define BOOTMENU_BLKDEV_ENTRY_CMD(devtype, devnum) \
+	"setenv devtype " #devtype "; " \
+	"setenv devnum " #devnum "; " \
+	"run " BOOTMENU_BLKDEV_CMD_NAME
+
+#endif
 
 static struct bootmenu_data *bootmenu_create(int delay)
 {
-	unsigned short int i = 0;
-	const char *option;
 	struct bootmenu_data *menu;
-	struct bootmenu_entry *iter = NULL;
 
 	int len;
-	char *sep;
-	char *default_str;
+	char *option, *sep, *targets, buffer[0x100];
 	struct bootmenu_entry *entry;
-
+#ifdef CONFIG_HAVE_BLOCK_DEVICE
+	struct blk_desc *desc;
+	const char *if_typename;
+	enum if_type *type;
+	int i, devnum;
+#endif
 	menu = malloc(sizeof(struct bootmenu_data));
 	if (!menu)
 		return NULL;
-
+	memset(menu, 0, sizeof(struct bootmenu_data));
 	menu->delay = delay;
-	menu->active = 0;
-	menu->first = NULL;
 
-	default_str = env_get("bootmenu_default");
-	if (default_str)
-		menu->active = (int)simple_strtol(default_str, NULL, 10);
-
-	while ((option = bootmenu_getoption(i))) {
+	while ((option = bootmenu_getoption(menu->count)) && menu->count < MAX_COUNT) {
 		sep = strchr(option, '=');
 		if (!sep) {
 			printf("Invalid bootmenu entry: %s\n", option);
 			break;
 		}
 
-		entry = malloc(sizeof(struct bootmenu_entry));
+		entry = bootmenu_make_entry(menu, option, sep-option, sep+1, 0);
 		if (!entry)
 			goto cleanup;
+	}
+	
+#ifdef CONFIG_HAVE_BLOCK_DEVICE
+	if (!env_get(BOOTMENU_BLKDEV_CMD_NAME))
+		env_set(BOOTMENU_BLKDEV_CMD_NAME, BOOTMENU_BLKDEV_CMD_DEFAULT_BODY);
 
-		len = sep-option;
-		entry->title = malloc(len + 1);
-		if (!entry->title) {
-			free(entry);
-			goto cleanup;
+	for (type = bootmenu_if_types; menu->count < MAX_COUNT && *type != IF_TYPE_UNKNOWN; ++type) {
+		for (devnum = 0;menu->count < MAX_COUNT &&
+			(desc = blk_get_devnum_by_type(*type, devnum)); ++devnum) {
+			if (desc->type == DEV_TYPE_UNKNOWN)
+				continue;
+			if (desc->if_type == IF_TYPE_UNKNOWN) /* wtf?!?! */
+				continue;
+			if_typename = blk_get_if_type_name(desc->if_type);
+			len = sprintf(buffer, "%s:%d %s", if_typename, desc->devnum, desc->product);
+			sprintf(&buffer[len+1], BOOTMENU_BLKDEV_ENTRY_CMD(%s, %d), if_typename, desc->devnum);
+
+			/* to upper */
+			i = 0;
+			while (buffer[i] > 96 && buffer[i] < 123 && i < len)
+				buffer[i++] -= 32;
+
+			entry = bootmenu_make_entry(menu, buffer, len, &buffer[len+1], 0);
+			if (!entry)
+				goto cleanup;
 		}
-		memcpy(entry->title, option, len);
-		entry->title[len] = 0;
+	}
 
-		len = strlen(sep + 1);
-		entry->command = malloc(len + 1);
-		if (!entry->command) {
-			free(entry->title);
-			free(entry);
-			goto cleanup;
+#endif
+	memcpy(&buffer[0], "run bootcmd_", 12);
+	targets = env_get("bootmenu_targets");
+	for (;targets!=0&&menu->count<MAX_COUNT;targets=(sep?&targets[len+1]:0)) {
+		sep = strchr(targets, ' ');
+		if ((len=sep?(sep-targets):strlen(targets)) && len < 0x100) {
+			memcpy(&buffer[12], targets, len);
+			buffer[12+len] = 0;
+			/*if (env_get(&buffer[4])) {*/
+			entry = bootmenu_make_entry(menu, &buffer[8], len+4, &buffer[0], 12+len);
+			if (!entry)
+				goto cleanup;
+
+			sep = strchr(entry->title, '.');
+			memcpy(sep+2, "Run ", 4);
+			/* to upper */
+			sep += 6;
+			while (*sep > 96 && *sep < 123)
+				*sep++ -= 32;
 		}
-		memcpy(entry->command, sep + 1, len);
-		entry->command[len] = 0;
-
-		sprintf(entry->key, "%d", i);
-
-		entry->num = i;
-		entry->menu = menu;
-		entry->next = NULL;
-
-		if (!iter)
-			menu->first = entry;
-		else
-			iter->next = entry;
-
-		iter = entry;
-		++i;
-
-		if (i == MAX_COUNT - 1)
-			break;
 	}
 
 	/* Add U-Boot console entry at the end */
-	if (i <= MAX_COUNT - 1) {
-		entry = malloc(sizeof(struct bootmenu_entry));
+	if (menu->count < MAX_COUNT) {
+		entry = bootmenu_make_entry(menu, "U-Boot console", 14, 0, 0);
 		if (!entry)
 			goto cleanup;
-
-		entry->title = strdup("U-Boot console");
-		if (!entry->title) {
-			free(entry);
-			goto cleanup;
-		}
-
-		entry->command = strdup("");
-		if (!entry->command) {
-			free(entry->title);
-			free(entry);
-			goto cleanup;
-		}
-
-		sprintf(entry->key, "%d", i);
-
-		entry->num = i;
-		entry->menu = menu;
-		entry->next = NULL;
-
-		if (!iter)
-			menu->first = entry;
-		else
-			iter->next = entry;
-
-		iter = entry;
-		++i;
-	}
-
-	menu->count = i;
-
-	if ((menu->active >= menu->count)||(menu->active < 0)) { //ensure active menuitem is inside menu
-		printf("active menuitem (%d) is outside menu (0..%d)\n",menu->active,menu->count-1);
-		menu->active=0;
 	}
 
 	return menu;
 
 cleanup:
-	bootmenu_destroy(menu);
+	bootmenu_destroy(&menu);
 	return NULL;
 }
 
 static void bootmenu_show(int delay)
 {
 	int init = 0;
-	void *choice = NULL;
 	char *title = NULL;
 	char *command = NULL;
-	struct menu *menu;
-	struct bootmenu_data *bootmenu;
+	struct menu *menu = NULL;
 	struct bootmenu_entry *iter;
-	char *option, *sep;
+	char *sep, strdef[3] = {'0', 0, 0};
+	int def = 0;
 
-	/* If delay is 0 do not create menu, just run first entry */
-	if (delay == 0) {
-		option = bootmenu_getoption(0);
-		if (!option) {
-			puts("bootmenu option 0 was not found\n");
+	if (!bootmenu) {
+		bootmenu = bootmenu_create(delay);
+		if (!bootmenu)
 			return;
+
+		if ((sep = env_get("bootmenu_default")) && *sep != 0 &&
+			(def = simple_strtol(sep, NULL, 10))) {
+			bootmenu->active = (def<0)
+				? ((def%=-bootmenu->count)?def+bootmenu->count:0)
+				: ((def%=bootmenu->count)?def:bootmenu->count)-1;
+			sprintf(strdef, "%d", bootmenu->active);
 		}
-		sep = strchr(option, '=');
-		if (!sep) {
-			puts("bootmenu option 0 is invalid\n");
-			return;
-		}
-		run_command(sep+1, 0);
-		return;
+	} else {
+		bootmenu->delay = delay;
 	}
 
-	bootmenu = bootmenu_create(delay);
-	if (!bootmenu)
-		return;
+	/* If delay is 0 do not create menu, just run active entry or bootcmd */
+	if (delay == 0) {
+		if (bootmenu->count <= 1 && (command = env_get("bootcmd"))) {
+			title = strdup("bootcmd");
+		} else {
+			for (iter = bootmenu->first; iter; iter = iter->next) {
+				if (bootmenu->active == iter->num) {
+					title = strdup(iter->title);
+					command = strdup(iter->command);
+				}
+			}
+		}
+		goto cleanup;
+	}
 
 	menu = menu_create(NULL, bootmenu->delay, 1, bootmenu_print_entry,
 			   bootmenu_choice_entry, bootmenu);
 	if (!menu) {
-		bootmenu_destroy(bootmenu);
+		bootmenu_destroy(&bootmenu);
 		return;
 	}
 
@@ -408,7 +487,7 @@ static void bootmenu_show(int delay)
 	}
 
 	/* Default menu entry is always first */
-	menu_default_set(menu, "0");
+	menu_default_set(menu, strdef);
 
 	puts(ANSI_CURSOR_HIDE);
 	puts(ANSI_CLEAR_CONSOLE);
@@ -416,15 +495,14 @@ static void bootmenu_show(int delay)
 
 	init = 1;
 
-	if (menu_get_choice(menu, &choice)) {
-		iter = choice;
+	if (menu_get_choice(menu, (void**)&iter)) {
 		title = strdup(iter->title);
 		command = strdup(iter->command);
 	}
 
 cleanup:
-	menu_destroy(menu);
-	bootmenu_destroy(bootmenu);
+	if (menu) menu_destroy(menu);
+	bootmenu_destroy(&bootmenu);
 
 	if (init) {
 		puts(ANSI_CURSOR_SHOW);
@@ -432,9 +510,12 @@ cleanup:
 		printf(ANSI_CURSOR_POSITION, 1, 1);
 	}
 
-	if (title && command) {
+	if (title) {
 		debug("Starting entry '%s'\n", title);
 		free(title);
+	}
+
+	if (command) {
 		run_command(command, 0);
 		free(command);
 	}
@@ -475,6 +556,17 @@ void menu_display_statusline(struct menu *m)
 #ifdef CONFIG_MENU_SHOW
 int menu_show(int bootdelay)
 {
+#ifdef CONFIG_MENUKEY
+	const char *stopkey;
+	char menukey = CONFIG_MENUKEY;
+
+	if ((stopkey = env_get("bootstopkey")) && stopkey[0] != '\0')
+		menukey = stopkey[0];
+
+	if (menukey != -1 && tstc())
+		if (menukey == getc())
+			bootdelay = -1;
+#endif
 	bootmenu_show(bootdelay);
 	return -1; /* -1 - abort boot and run monitor code */
 }
@@ -507,4 +599,46 @@ U_BOOT_CMD(
 	"ANSI terminal bootmenu",
 	"[delay]\n"
 	"    - show ANSI terminal bootmenu with autoboot delay"
+);
+
+int do_bootmenu_add(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv[])
+{
+	if (argc < 3)
+		return -1;
+
+	if (bootmenu == NULL) {
+		bootmenu = malloc(sizeof(struct bootmenu_data));
+		if (!bootmenu)
+			return -1;
+		memset(bootmenu, 0, sizeof(struct bootmenu_data));
+	} else if (bootmenu->count >= MAX_COUNT) {
+		return -1;
+	}
+
+	if (!bootmenu_make_entry(bootmenu, argv[1], 0, argv[2], 0))
+		return -1;
+
+	return 0;
+}
+
+U_BOOT_CMD(
+	bootmenu_add, 3, 1, do_bootmenu_add,
+	"add menu to bootmenu",
+	"text\n"
+	"    - Text to be shown in the menu\n"
+	"command\n"
+	"    - Run command when choosing"
+);
+
+int do_bootmenu_clean(cmd_tbl_t *cmdtp, int flag, int argc, char *const argv[])
+{
+	if (bootmenu)
+		bootmenu_destroy(&bootmenu);
+	return 0;
+}
+
+U_BOOT_CMD(
+	bootmenu_clean, 1, 0, do_bootmenu_clean,
+	"Delete all added menu's",
+	"\n"
 );
