@@ -168,6 +168,7 @@ const struct spi_flash_info spi_flash_ids[] = {
 	{"w25p16",	   INFO(0xef2015, 0x0,	64 * 1024,    32, 0) },
 	{"w25p32",	   INFO(0xef2016, 0x0,	64 * 1024,    64, 0) },
 	{"w25x40",	   INFO(0xef3013, 0x0,	64 * 1024,     8, SECT_4K) },
+	{"w25x80",	   INFO(0xef3014, 0x0,	64 * 1024,    16, SECT_4K) },
 	{"w25x16",	   INFO(0xef3015, 0x0,	64 * 1024,    32, SECT_4K) },
 	{"w25x32",	   INFO(0xef3016, 0x0,	64 * 1024,    64, SECT_4K) },
 	{"w25x64",	   INFO(0xef3017, 0x0,	64 * 1024,   128, SECT_4K) },
