@@ -222,6 +222,12 @@ config SUN4I_SPI
 	bool "Allwinner A10 SoCs SPI controller"
 	help
 	  SPI driver for Allwinner sun4i, sun5i and sun7i SoCs
+ 
+config SUN6I_SPI
+	bool "Allwinner A31 SPI controller"
+	depends on ARCH_SUNXI
+	help
+	  This enables using the SPI controller on the Allwinner A31 SoCs.
 
 config TEGRA114_SPI
 	bool "nVidia Tegra114 SPI driver"
