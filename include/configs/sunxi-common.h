@@ -134,6 +134,10 @@
 #define CONFIG_MMC_SUNXI_SLOT		0
 #endif
 
+#if !defined(CONFIG_ENV_SECT_SIZE) && defined(CONFIG_ENV_SIZE)
+#define CONFIG_ENV_SECT_SIZE CONFIG_ENV_SIZE
+#endif
+
 #if defined(CONFIG_ENV_IS_IN_MMC)
 
 #ifdef CONFIG_ARM64
