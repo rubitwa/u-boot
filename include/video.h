@@ -69,7 +69,8 @@ enum video_log2_bpp {
  * @flush_dcache:	true to enable flushing of the data cache after
  *		the LCD is updated
  * @cmap:	Colour map for 8-bit-per-pixel displays
- * @fg_col_idx:	Foreground color code (bit 3 = bold, bit 0-2 = color)
+ * @def_color:	Default foreground and background color codes
+ * @color:	Current foreground and background color codes
  */
 struct video_priv {
 	/* Things set up by the driver: */
@@ -91,7 +92,8 @@ struct video_priv {
 	u32 colour_bg;
 	bool flush_dcache;
 	ushort *cmap;
-	u8 fg_col_idx;
+	u8 def_color;
+	u8 color;
 };
 
 /* Placeholder - there are no video operations at present */
