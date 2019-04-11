@@ -228,6 +228,7 @@ const struct flash_info spi_nor_ids[] = {
 	{ INFO("w25p16", 0xef2015, 0x0,	64 * 1024,    32, 0) },
 	{ INFO("w25p32", 0xef2016, 0x0,	64 * 1024,    64, 0) },
 	{ INFO("w25x05", 0xef3010, 0, 64 * 1024,  1,  SECT_4K) },
+	{ INFO("w25x40", 0xef3013, 0, 64 * 1024,  8,  SECT_4K) },
 	{ INFO("w25x16", 0xef3015, 0, 64 * 1024,  32, SECT_4K) },
 	{
 		INFO("w25q16dw", 0xef6015, 0, 64 * 1024,  32,
