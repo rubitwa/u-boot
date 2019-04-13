@@ -258,6 +258,22 @@ config MENU
 	  This is the library functionality to provide a text-based menu of
 	  choices for the user to make choices with.
 
+config MENU_SHOW
+	bool "Show boot menu"
+	depends on MENU
+	help
+	  Show boot menu at start
+
+config MENUKEY
+	int "Run menucmd at start via specific input key"
+	default 32
+	range 0 255
+	depends on MENU
+	depends on AUTOBOOT && !AUTOBOOT_KEYED
+	help
+	  This option checks specific input key at start
+	  and run menucmd environment variable.
+
 config CONSOLE_RECORD
 	bool "Console recording"
 	help
