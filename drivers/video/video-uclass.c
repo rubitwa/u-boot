@@ -121,27 +121,16 @@ int video_clear(struct udevice *dev)
 void video_set_default_colors(struct udevice *dev, bool invert)
 {
 	struct video_priv *priv = dev_get_uclass_priv(dev);
-	int fore, back;
 
-	if (CONFIG_IS_ENABLED(SYS_WHITE_ON_BLACK)) {
-		/* White is used when switching to bold, use light gray here */
-		fore = VID_LIGHT_GRAY;
-		back = VID_BLACK;
-	} else {
-		fore = VID_BLACK;
-		back = VID_WHITE;
-	}
-	if (invert) {
-		int temp;
-
-		temp = fore;
-		fore = back;
-		back = temp;
-	}
-	priv->fg_col_idx = fore;
-	priv->bg_col_idx = back;
-	priv->colour_fg = vid_console_color(priv, fore);
-	priv->colour_bg = vid_console_color(priv, back);
+#ifdef CONFIG_SYS_WHITE_ON_BLACK
+	/* White is used when switching to bold, use light gray here */
+	priv->def_color = VID_LIGHT_GRAY;
+#else
+	priv->def_color = (VID_WHITE << 4 & 0xf0 ) | (VID_BLACK & 0x0f);
+#endif
+	priv->color = priv->def_color;
+	priv->colour_fg = vid_console_color(priv, priv->color & 0x0f);
+	priv->colour_bg = vid_console_color(priv, priv->color >> 4);
 }
 
 /* Flush video activity to the caches */

@@ -17,11 +17,7 @@
 /*
  * Structure to describe a console color
  */
-struct vid_rgb {
-	u32 r;
-	u32 g;
-	u32 b;
-};
+struct vid_rgb { u8 r; u8 g; u8 b; };
 
 /* By default we scroll by a single line */
 #ifndef CONFIG_CONSOLE_SCROLL_LINES
@@ -412,34 +408,24 @@ static void vidconsole_escape_char(struct udevice *dev, char ch)
 			switch (val) {
 			case 0:
 				/* all attributes off */
-				video_set_default_colors(dev->parent, false);
+				vid_priv->color = vid_priv->def_color;
 				break;
 			case 1:
 				/* bold */
-				vid_priv->fg_col_idx |= 8;
-				vid_priv->colour_fg = vid_console_color(
-						vid_priv, vid_priv->fg_col_idx);
+				vid_priv->color ^= 0x08;
 				break;
 			case 7:
-				/* reverse video */
-				vid_priv->colour_fg = vid_console_color(
-						vid_priv, vid_priv->bg_col_idx);
-				vid_priv->colour_bg = vid_console_color(
-						vid_priv, vid_priv->fg_col_idx);
-				break;
+				/* swap colors */
+				vid_priv->color = (vid_priv->color & 0x88) | 
+					(((vid_priv->color >> 4) | (vid_priv->color << 4)) & 0x77);
+ 				break;
 			case 30 ... 37:
 				/* foreground color */
-				vid_priv->fg_col_idx &= ~7;
-				vid_priv->fg_col_idx |= val - 30;
-				vid_priv->colour_fg = vid_console_color(
-						vid_priv, vid_priv->fg_col_idx);
+				vid_priv->color = (val - 30) | (vid_priv->color & 0xf0);
 				break;
 			case 40 ... 47:
-				/* background color, also mask the bold bit */
-				vid_priv->bg_col_idx &= ~0xf;
-				vid_priv->bg_col_idx |= val - 40;
-				vid_priv->colour_bg = vid_console_color(
-						vid_priv, vid_priv->bg_col_idx);
+				/* background color */
+				vid_priv->color = ((val - 40) << 4) | (vid_priv->color & 0x0f);
 				break;
 			default:
 				/* ignore unsupported SGR parameter */
@@ -447,6 +433,8 @@ static void vidconsole_escape_char(struct udevice *dev, char ch)
 			}
 		}
 
+		vid_priv->colour_fg = vid_console_color(vid_priv, vid_priv->color & 0x0f);
+		vid_priv->colour_bg = vid_console_color(vid_priv, vid_priv->color >> 4);
 		break;
 	}
 	default:
